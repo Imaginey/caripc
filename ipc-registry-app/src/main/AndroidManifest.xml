@@ -1,0 +1,34 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.caripc.registry">
+
+    <permission
+        android:name="com.caripc.permission.ACCESS_REGISTRY"
+        android:protectionLevel="normal" />
+
+    <uses-permission android:name="com.caripc.permission.ACCESS_REGISTRY" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application
+        android:label="CarIpc Registry"
+        android:persistent="true"
+        android:allowBackup="false">
+        <service
+            android:name=".RegistryService"
+            android:exported="true"
+            android:permission="com.caripc.permission.ACCESS_REGISTRY">
+            <intent-filter>
+                <action android:name="com.caripc.registry.ACTION_REGISTRY" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

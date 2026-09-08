@@ -1,0 +1,33 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.caripc.sample.server">
+
+    <uses-permission android:name="com.caripc.permission.ACCESS_REGISTRY" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <queries>
+        <package android:name="com.caripc.registry" />
+    </queries>
+
+    <application
+        android:label="CarIpc Climate Server"
+        android:persistent="true"
+        android:allowBackup="false">
+        <service
+            android:name=".ClimateServerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.caripc.sample.server.ACTION_START_CLIMATE" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
