@@ -68,18 +68,26 @@ data class PropertyKey<T : Any>(
 
     companion object {
         @JvmStatic
+        @JvmName("booleanKey")
+        @JvmOverloads
         fun boolean(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true): PropertyKey<Boolean> =
             PropertyKey(id, ValueType.BOOLEAN, readable, writable, observable)
 
         @JvmStatic
+        @JvmName("intKey")
+        @JvmOverloads
         fun int(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, min: Int? = null, max: Int? = null, unit: String? = null): PropertyKey<Int> =
             PropertyKey(id, ValueType.INT, readable, writable, observable, unit, min?.toDouble(), max?.toDouble())
 
         @JvmStatic
+        @JvmName("longKey")
+        @JvmOverloads
         fun long(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, min: Long? = null, max: Long? = null, unit: String? = null): PropertyKey<Long> =
             PropertyKey(id, ValueType.LONG, readable, writable, observable, unit, min?.toDouble(), max?.toDouble())
 
         @JvmStatic
+        @JvmName("floatKey")
+        @JvmOverloads
         fun float(
             id: String,
             readable: Boolean = true,
@@ -93,14 +101,20 @@ data class PropertyKey<T : Any>(
             PropertyKey(id, ValueType.FLOAT, readable, writable, observable, unit, min?.toDouble(), max?.toDouble(), notificationPolicy)
 
         @JvmStatic
+        @JvmName("doubleKey")
+        @JvmOverloads
         fun double(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, min: Double? = null, max: Double? = null, unit: String? = null): PropertyKey<Double> =
             PropertyKey(id, ValueType.DOUBLE, readable, writable, observable, unit, min, max)
 
         @JvmStatic
+        @JvmName("stringKey")
+        @JvmOverloads
         fun string(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, maxLength: Int? = null): PropertyKey<String> =
             PropertyKey(id, ValueType.STRING, readable, writable, observable, null, null, maxLength?.toDouble())
 
         @JvmStatic
+        @JvmName("bundleKey")
+        @JvmOverloads
         fun <T : Any> bundle(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true): PropertyKey<T> =
             PropertyKey(id, ValueType.BUNDLE, readable, writable, observable)
     }
@@ -135,14 +149,17 @@ data class CommandKey<Req : Any, Resp : Any>(
 ) : CapabilityKey {
     companion object {
         @JvmStatic
+        @JvmOverloads
         fun stringToString(id: String, retryPolicy: RetryPolicy = RetryPolicy.NEVER): CommandKey<String, String> =
             CommandKey(id, ValueType.STRING, ValueType.STRING, retryPolicy)
 
         @JvmStatic
+        @JvmOverloads
         fun stringToInt(id: String, retryPolicy: RetryPolicy = RetryPolicy.NEVER): CommandKey<String, Int> =
             CommandKey(id, ValueType.STRING, ValueType.INT, retryPolicy)
 
         @JvmStatic
+        @JvmOverloads
         fun <Req : Any, Resp : Any> bundleToBundle(id: String, retryPolicy: RetryPolicy = RetryPolicy.NEVER): CommandKey<Req, Resp> =
             CommandKey(id, ValueType.BUNDLE, ValueType.BUNDLE, retryPolicy)
     }

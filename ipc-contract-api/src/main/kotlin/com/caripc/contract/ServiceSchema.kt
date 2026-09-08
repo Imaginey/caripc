@@ -21,4 +21,21 @@ data class ServiceSchema(
     fun findProperty(id: String): PropertyKey<*>? = propertyMap[id]
     fun findEvent(id: String): EventKey<*>? = eventMap[id]
     fun findCommand(id: String): CommandKey<*, *>? = commandMap[id]
+
+    class Builder(val contractId: String, val major: Int, val minor: Int) {
+        private val properties = mutableListOf<PropertyKey<*>>()
+        private val events = mutableListOf<EventKey<*>>()
+        private val commands = mutableListOf<CommandKey<*, *>>()
+
+        fun addProperty(key: PropertyKey<*>) = apply { properties.add(key) }
+        fun addEvent(key: EventKey<*>) = apply { events.add(key) }
+        fun addCommand(key: CommandKey<*, *>) = apply { commands.add(key) }
+
+        fun build() = ServiceSchema(contractId, major, minor, properties, events, commands)
+    }
+
+    companion object {
+        @JvmStatic
+        fun builder(contractId: String, major: Int, minor: Int) = Builder(contractId, major, minor)
+    }
 }

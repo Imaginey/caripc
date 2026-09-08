@@ -8,6 +8,14 @@ import java.io.Closeable
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
+fun interface OnSetHandler {
+    fun onSet(keyId: String, value: Any?, callerUid: Int): SetReceipt
+}
+
+fun interface OnCallHandler {
+    fun onCall(commandId: String, param: Any?, callerUid: Int): Any?
+}
+
 class CarIpc private constructor(
     private val context: Context,
     private val config: CarIpcConfig
@@ -26,6 +34,15 @@ class CarIpc private constructor(
     private val permissionPolicy = PermissionPolicy(context)
     private val publishers = ConcurrentHashMap<String, ServicePublisherImpl>()
     private val connections = ConcurrentHashMap<String, RemoteServiceImpl>()
+
+    fun publishService(
+        serviceId: String,
+        schema: ServiceSchema,
+        onSetHandler: OnSetHandler,
+        onCallHandler: OnCallHandler
+    ): ServicePublisher {
+        return publishService(serviceId, schema, onSetHandler::onSet, onCallHandler::onCall)
+    }
 
     fun publishService(
         serviceId: String,
@@ -107,6 +124,7 @@ class CarIpc private constructor(
 
     companion object {
         @JvmStatic
+        @JvmOverloads
         fun create(context: Context, config: CarIpcConfig = CarIpcConfig()): CarIpc {
             return CarIpc(context.applicationContext ?: context, config)
         }
@@ -184,6 +202,15 @@ class CarIpc private constructor(
             controller.start()
         }
 
+        private fun <T> toResultCallback(ipcCallback: IpcCallback<T>): ResultCallback<T> {
+            return ResultCallback { result ->
+                result.onSuccess { ipcCallback.onSuccess(it) }
+                result.onFailure { th ->
+                    ipcCallback.onError(th as? IpcError ?: IpcError(ErrorCode.INTERNAL_ERROR, th.message ?: "Unknown"))
+                }
+            }
+        }
+
         override fun awaitReady(timeoutMs: Long, callback: ResultCallback<Unit>) {
             controller.awaitReady(if (timeoutMs > 0) timeoutMs else config.awaitReadyTimeoutMs) { res ->
                 res.onSuccess { callback.onSuccess(Unit) }
@@ -191,20 +218,40 @@ class CarIpc private constructor(
             }
         }
 
+        override fun awaitReady(timeoutMs: Long, callback: IpcCallback<Unit>) {
+            awaitReady(timeoutMs, toResultCallback(callback))
+        }
+
         override fun <T : Any> get(key: PropertyKey<T>, callback: ResultCallback<PropertySnapshot<T>>) {
             controller.get(key, config.requestTimeoutMs, callback)
+        }
+
+        override fun <T : Any> get(key: PropertyKey<T>, callback: IpcCallback<PropertySnapshot<T>>) {
+            get(key, toResultCallback(callback))
         }
 
         override fun <T : Any> set(key: PropertyKey<T>, value: T, callback: ResultCallback<SetReceipt>) {
             controller.set(key, value, null, config.requestTimeoutMs, callback)
         }
 
+        override fun <T : Any> set(key: PropertyKey<T>, value: T, callback: IpcCallback<SetReceipt>) {
+            set(key, value, toResultCallback(callback))
+        }
+
         override fun <T : Any> setIfVersion(key: PropertyKey<T>, value: T, writeToken: String?, callback: ResultCallback<SetReceipt>) {
             controller.set(key, value, writeToken, config.requestTimeoutMs, callback)
         }
 
+        override fun <T : Any> setIfVersion(key: PropertyKey<T>, value: T, writeToken: String?, callback: IpcCallback<SetReceipt>) {
+            setIfVersion(key, value, writeToken, toResultCallback(callback))
+        }
+
         override fun <Req : Any, Resp : Any> call(command: CommandKey<Req, Resp>, param: Req, callback: ResultCallback<Resp>) {
             controller.call(command, param, config.requestTimeoutMs, callback)
+        }
+
+        override fun <Req : Any, Resp : Any> call(command: CommandKey<Req, Resp>, param: Req, callback: IpcCallback<Resp>) {
+            call(command, param, toResultCallback(callback))
         }
 
         override fun subscribe(

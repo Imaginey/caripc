@@ -16,6 +16,7 @@
   - [3. 客户端：连接、调用与订阅 (Client)](#3-客户端连接调用与订阅-client)
   - [4. 进阶：Kotlin 协程与 Flow DSL 响应式编程](#4-进阶kotlin-协程与-flow-dsl-响应式编程)
   - [5. 单进程双角色（Dual-Role）](#5-单进程双角色dual-role)
+  - [6. 纯 Java 应用接入与互操作指南](#6-纯-java-应用接入与互操作指南)
 - [五、 关键机制与设计规范](#五-关键机制与设计规范)
 - [六、 错误码与排查指南](#六-错误码与排查指南)
 
@@ -368,6 +369,151 @@ class VehicleServiceManager(context: Context) {
         ipc.close() // 统一释放所有客户端直连与服务端端点
     }
 }
+```
+
+---
+
+### 6. 纯 Java 应用接入与互操作指南
+
+中间件底层经过了高度的 Java 互操作（Java Interop）设计与对齐，**纯 Java 开发的应用无需依赖 Kotlin 协程/扩展库，只需引入标准 Jar/AAR 即可享有与 Kotlin 完全等价的完整功能**。
+
+#### (1) 依赖配置
+纯 Java 业务工程只需引入 `:ipc-contract-api` 与 `:ipc-sdk`，无需引入 `:ipc-sdk-ktx`：
+```groovy
+// build.gradle (Java Module)
+dependencies {
+    implementation project(':ipc-contract-api')
+    implementation project(':ipc-sdk')
+}
+```
+
+#### (2) 契约定义 (纯 Java)
+使用契约工厂方法与 `ServiceSchema.builder()` 构建契约，完美避免 Java 关键字冲突：
+```java
+package com.company.vehicle.contract;
+
+import android.os.Bundle;
+import com.caripc.contract.*;
+
+public final class ClimateContract {
+    public static final String SERVICE_ID = "com.company.vehicle.climate";
+
+    // 属性定义：提供 floatKey / intKey / bundleKey 等友好命名
+    public static final PropertyKey<Float> TARGET_TEMPERATURE = PropertyKey.floatKey("target_temperature", 16.0f, 32.0f);
+    public static final PropertyKey<Integer> FAN_SPEED = PropertyKey.intKey("fan_speed", 0, 7);
+    public static final PropertyKey<Bundle> CLIMATE_BUNDLE = PropertyKey.bundleKey("climate_bundle");
+
+    // 命令定义
+    public static final CommandKey<String, String> START_SELF_TEST = CommandKey.stringToString("start_self_test");
+
+    // 契约 Schema 聚合
+    public static final ServiceSchema SCHEMA = ServiceSchema.builder(SERVICE_ID, 1, 0)
+            .addProperty(TARGET_TEMPERATURE)
+            .addProperty(FAN_SPEED)
+            .addProperty(CLIMATE_BUNDLE)
+            .addCommand(START_SELF_TEST)
+            .build();
+
+    private ClimateContract() {}
+}
+```
+
+#### (3) 服务端发布 (纯 Java)
+通过 `CarIpc.publishService` 结合 Java Lambda 注册 Handler：
+```java
+CarIpc ipc = CarIpc.create(context);
+
+ServicePublisher publisher = ipc.publishService(
+    ClimateContract.SERVICE_ID,
+    ClimateContract.SCHEMA,
+    // OnSetHandler: 处理属性修改
+    (keyId, value, callerUid) -> {
+        Log.i("CarIpcServer", "Java 收到属性设置请求: key=" + keyId + ", val=" + value);
+        // 执行底层硬件控制并返回回执
+        return SetReceipt.accepted();
+    },
+    // OnCallHandler: 处理远程命令调用
+    (commandId, param, callerUid) -> {
+        Log.i("CarIpcServer", "Java 收到命令调用: cmd=" + commandId + ", param=" + param);
+        return "RESULT_SUCCESS";
+    }
+);
+
+// 广播更新权威属性值
+publisher.update(ClimateContract.TARGET_TEMPERATURE, 24.5f);
+```
+
+#### (4) 客户端调用与异步回调 (纯 Java)
+SDK 为 Java 提供了标准的 `IpcCallback<T>` 双方法接口（`onSuccess` / `onError`），彻底规避 Kotlin Result 符号兼容问题：
+```java
+CarIpc ipc = CarIpc.create(context);
+RemoteService client = ipc.connect(ClimateContract.SERVICE_ID);
+
+// 1. 等待服务就绪
+client.awaitReady(3000, new IpcCallback<Void>() {
+    @Override
+    public void onSuccess(Void unused) {
+        Log.i("CarIpcClient", "已直连到服务端！");
+
+        // 2. 异步读取属性 (get)
+        client.get(ClimateContract.TARGET_TEMPERATURE, new IpcCallback<PropertySnapshot<Float>>() {
+            @Override
+            public void onSuccess(PropertySnapshot<Float> snapshot) {
+                Log.i("CarIpcClient", "当前温度: " + snapshot.getValue() + ", 版本: " + snapshot.getRevision());
+            }
+
+            @Override
+            public void onError(IpcError error) {
+                Log.e("CarIpcClient", "读取失败: " + error.getMessage());
+            }
+        });
+
+        // 3. 异步修改属性 (set)
+        client.set(ClimateContract.TARGET_TEMPERATURE, 26.0f, new IpcCallback<SetReceipt>() {
+            @Override
+            public void onSuccess(SetReceipt receipt) {
+                Log.i("CarIpcClient", "设置成功，回执状态: " + receipt.getStatus());
+            }
+
+            @Override
+            public void onError(IpcError error) {
+                Log.e("CarIpcClient", "设置失败: " + error.getMessage());
+            }
+        });
+
+        // 4. 远程命令调用 (call)
+        client.call(ClimateContract.START_SELF_TEST, "PARAM_CHECK", new IpcCallback<String>() {
+            @Override
+            public void onSuccess(String result) {
+                Log.i("CarIpcClient", "命令调用结果: " + result);
+            }
+
+            @Override
+            public void onError(IpcError error) {
+                Log.e("CarIpcClient", "命令调用失败: " + error.getMessage());
+            }
+        });
+
+        // 5. 状态订阅 (subscribe)
+        CancelHandle subscription = client.subscribe(
+            Collections.singletonList(ClimateContract.TARGET_TEMPERATURE),
+            message -> {
+                if (message.getPayload() instanceof PropertyUpdate) {
+                    PropertyUpdate<?> update = (PropertyUpdate<?>) message.getPayload();
+                    Log.i("CarIpcClient", "订阅推送: " + update.getKey().getId() + " = " + update.getSnapshot().getValue());
+                }
+            }
+        );
+
+        // 必要时取消订阅
+        // subscription.cancel();
+    }
+
+    @Override
+    public void onError(IpcError error) {
+        Log.e("CarIpcClient", "服务连接失败: " + error.getMessage());
+    }
+});
 ```
 
 ---

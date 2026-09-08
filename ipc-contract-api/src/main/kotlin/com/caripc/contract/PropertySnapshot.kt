@@ -26,10 +26,12 @@ data class SetReceipt(
 
     companion object {
         @JvmStatic
+        @JvmOverloads
         fun accepted(writeToken: String? = null, operationId: String? = null): SetReceipt =
             SetReceipt(SetStatus.ACCEPTED, operationId, writeToken)
 
         @JvmStatic
+        @JvmOverloads
         fun applied(writeToken: String? = null, operationId: String? = null): SetReceipt =
             SetReceipt(SetStatus.APPLIED, operationId, writeToken)
 
