@@ -157,7 +157,7 @@ object ClimateContract {
     const val SERVICE_ID = "com.company.vehicle.climate"
 
     // 属性：目标温度，支持数值边界与死区限频过滤
-    val TARGET_TEMPERATURE = PropertyKey.float(
+    val TARGET_TEMPERATURE = PropertyKey.createFloat(
         id = "target_temperature",
         min = 16.0f,
         max = 32.0f,
@@ -168,10 +168,10 @@ object ClimateContract {
     )
 
     // 属性：风速，整型范围 0 ~ 7
-    val FAN_SPEED = PropertyKey.int("fan_speed", min = 0, max = 7)
+    val FAN_SPEED = PropertyKey.createInt("fan_speed", min = 0, max = 7)
 
     // 原生支持复杂容器：Bundle 属性（如整车/分区状态集）
-    val CLIMATE_SETTINGS_BUNDLE = PropertyKey.bundle<android.os.Bundle>("climate_settings_bundle", readable = true, writable = true)
+    val CLIMATE_SETTINGS_BUNDLE = PropertyKey.createBundle<android.os.Bundle>("climate_settings_bundle", readable = true, writable = true)
 
     // 命令：自检命令，入参为 String，返回值为 String
     val START_SELF_TEST = CommandKey.stringToString("start_self_test")
@@ -180,7 +180,7 @@ object ClimateContract {
     val EXECUTE_PROFILE_CMD = CommandKey.bundleToBundle<android.os.Bundle, android.os.Bundle>("execute_profile_cmd")
 
     // 事件：自检完成事件
-    val SELF_TEST_FINISHED = EventKey.string("self_test_finished")
+    val SELF_TEST_FINISHED = EventKey.createString("self_test_finished")
 
     // 聚合定义 ServiceSchema
     val schema = ServiceSchema.builder(SERVICE_ID, majorVersion = 1, minorVersion = 0)
@@ -398,10 +398,10 @@ import com.caripc.contract.*;
 public final class ClimateContract {
     public static final String SERVICE_ID = "com.company.vehicle.climate";
 
-    // 属性定义：提供 floatKey / intKey / bundleKey 等友好命名
-    public static final PropertyKey<Float> TARGET_TEMPERATURE = PropertyKey.floatKey("target_temperature", 16.0f, 32.0f);
-    public static final PropertyKey<Integer> FAN_SPEED = PropertyKey.intKey("fan_speed", 0, 7);
-    public static final PropertyKey<Bundle> CLIMATE_BUNDLE = PropertyKey.bundleKey("climate_bundle");
+    // 属性定义：双端完全一致采用 PropertyKey.createXxx 工厂方法
+    public static final PropertyKey<Float> TARGET_TEMPERATURE = PropertyKey.createFloat("target_temperature", 16.0f, 32.0f);
+    public static final PropertyKey<Integer> FAN_SPEED = PropertyKey.createInt("fan_speed", 0, 7);
+    public static final PropertyKey<Bundle> CLIMATE_BUNDLE = PropertyKey.createBundle("climate_bundle");
 
     // 命令定义
     public static final CommandKey<String, String> START_SELF_TEST = CommandKey.stringToString("start_self_test");

@@ -114,7 +114,7 @@ class ConnectionController(
                 SubscriptionEnvelope.KIND_PROPERTY -> {
                     val rawVal = msg.payload?.toValue()
                     @Suppress("UNCHECKED_CAST")
-                    val propKey = PropertyKey.string(msg.capabilityId) as PropertyKey<Any>
+                    val propKey = PropertyKey.createString(msg.capabilityId) as PropertyKey<Any>
                     val snapshot = PropertySnapshot<Any>(
                         key = propKey,
                         value = rawVal,
@@ -128,7 +128,7 @@ class ConnectionController(
                 }
                 SubscriptionEnvelope.KIND_EVENT -> {
                     val rawVal = msg.payload?.toValue()?.toString() ?: ""
-                    EventEmission(EventKey.string(msg.capabilityId), rawVal, msg.deliverySeq)
+                    EventEmission(EventKey.createString(msg.capabilityId), rawVal, msg.deliverySeq)
                 }
                 SubscriptionEnvelope.KIND_GAP -> {
                     SubscriptionGap(msg.subscriptionId, 0L, msg.deliverySeq, "Message gap detected")

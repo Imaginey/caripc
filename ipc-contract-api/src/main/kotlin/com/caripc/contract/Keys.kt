@@ -68,27 +68,23 @@ data class PropertyKey<T : Any>(
 
     companion object {
         @JvmStatic
-        @JvmName("booleanKey")
         @JvmOverloads
-        fun boolean(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true): PropertyKey<Boolean> =
+        fun createBoolean(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true): PropertyKey<Boolean> =
             PropertyKey(id, ValueType.BOOLEAN, readable, writable, observable)
 
         @JvmStatic
-        @JvmName("intKey")
         @JvmOverloads
-        fun int(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, min: Int? = null, max: Int? = null, unit: String? = null): PropertyKey<Int> =
+        fun createInt(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, min: Int? = null, max: Int? = null, unit: String? = null): PropertyKey<Int> =
             PropertyKey(id, ValueType.INT, readable, writable, observable, unit, min?.toDouble(), max?.toDouble())
 
         @JvmStatic
-        @JvmName("longKey")
         @JvmOverloads
-        fun long(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, min: Long? = null, max: Long? = null, unit: String? = null): PropertyKey<Long> =
+        fun createLong(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, min: Long? = null, max: Long? = null, unit: String? = null): PropertyKey<Long> =
             PropertyKey(id, ValueType.LONG, readable, writable, observable, unit, min?.toDouble(), max?.toDouble())
 
         @JvmStatic
-        @JvmName("floatKey")
         @JvmOverloads
-        fun float(
+        fun createFloat(
             id: String,
             readable: Boolean = true,
             writable: Boolean = false,
@@ -101,22 +97,57 @@ data class PropertyKey<T : Any>(
             PropertyKey(id, ValueType.FLOAT, readable, writable, observable, unit, min?.toDouble(), max?.toDouble(), notificationPolicy)
 
         @JvmStatic
-        @JvmName("doubleKey")
         @JvmOverloads
-        fun double(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, min: Double? = null, max: Double? = null, unit: String? = null): PropertyKey<Double> =
+        fun createDouble(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, min: Double? = null, max: Double? = null, unit: String? = null): PropertyKey<Double> =
             PropertyKey(id, ValueType.DOUBLE, readable, writable, observable, unit, min, max)
 
         @JvmStatic
-        @JvmName("stringKey")
         @JvmOverloads
-        fun string(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, maxLength: Int? = null): PropertyKey<String> =
+        fun createString(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, maxLength: Int? = null): PropertyKey<String> =
             PropertyKey(id, ValueType.STRING, readable, writable, observable, null, null, maxLength?.toDouble())
 
         @JvmStatic
-        @JvmName("bundleKey")
         @JvmOverloads
-        fun <T : Any> bundle(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true): PropertyKey<T> =
+        fun <T : Any> createBundle(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true): PropertyKey<T> =
             PropertyKey(id, ValueType.BUNDLE, readable, writable, observable)
+
+        // 向后兼容保留
+        @Deprecated("Use PropertyKey.createBoolean instead", ReplaceWith("PropertyKey.createBoolean(id, readable, writable, observable)"))
+        fun boolean(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true): PropertyKey<Boolean> =
+            createBoolean(id, readable, writable, observable)
+
+        @Deprecated("Use PropertyKey.createInt instead", ReplaceWith("PropertyKey.createInt(id, readable, writable, observable, min, max, unit)"))
+        fun int(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, min: Int? = null, max: Int? = null, unit: String? = null): PropertyKey<Int> =
+            createInt(id, readable, writable, observable, min, max, unit)
+
+        @Deprecated("Use PropertyKey.createLong instead", ReplaceWith("PropertyKey.createLong(id, readable, writable, observable, min, max, unit)"))
+        fun long(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, min: Long? = null, max: Long? = null, unit: String? = null): PropertyKey<Long> =
+            createLong(id, readable, writable, observable, min, max, unit)
+
+        @Deprecated("Use PropertyKey.createFloat instead", ReplaceWith("PropertyKey.createFloat(id, readable, writable, observable, min, max, unit, notificationPolicy)"))
+        fun float(
+            id: String,
+            readable: Boolean = true,
+            writable: Boolean = false,
+            observable: Boolean = true,
+            min: Float? = null,
+            max: Float? = null,
+            unit: String? = null,
+            notificationPolicy: NotificationPolicy? = null
+        ): PropertyKey<Float> =
+            createFloat(id, readable, writable, observable, min, max, unit, notificationPolicy)
+
+        @Deprecated("Use PropertyKey.createDouble instead", ReplaceWith("PropertyKey.createDouble(id, readable, writable, observable, min, max, unit)"))
+        fun double(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, min: Double? = null, max: Double? = null, unit: String? = null): PropertyKey<Double> =
+            createDouble(id, readable, writable, observable, min, max, unit)
+
+        @Deprecated("Use PropertyKey.createString instead", ReplaceWith("PropertyKey.createString(id, readable, writable, observable, maxLength)"))
+        fun string(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true, maxLength: Int? = null): PropertyKey<String> =
+            createString(id, readable, writable, observable, maxLength)
+
+        @Deprecated("Use PropertyKey.createBundle instead", ReplaceWith("PropertyKey.createBundle(id, readable, writable, observable)"))
+        fun <T : Any> bundle(id: String, readable: Boolean = true, writable: Boolean = false, observable: Boolean = true): PropertyKey<T> =
+            createBundle(id, readable, writable, observable)
     }
 }
 
@@ -126,13 +157,22 @@ data class EventKey<T : Any>(
 ) : CapabilityKey {
     companion object {
         @JvmStatic
-        fun string(id: String): EventKey<String> = EventKey(id, ValueType.STRING)
+        fun createString(id: String): EventKey<String> = EventKey(id, ValueType.STRING)
 
         @JvmStatic
-        fun int(id: String): EventKey<Int> = EventKey(id, ValueType.INT)
+        fun createInt(id: String): EventKey<Int> = EventKey(id, ValueType.INT)
 
         @JvmStatic
-        fun <T : Any> bundle(id: String): EventKey<T> = EventKey(id, ValueType.BUNDLE)
+        fun <T : Any> createBundle(id: String): EventKey<T> = EventKey(id, ValueType.BUNDLE)
+
+        @Deprecated("Use EventKey.createString instead", ReplaceWith("EventKey.createString(id)"))
+        fun string(id: String): EventKey<String> = createString(id)
+
+        @Deprecated("Use EventKey.createInt instead", ReplaceWith("EventKey.createInt(id)"))
+        fun int(id: String): EventKey<Int> = createInt(id)
+
+        @Deprecated("Use EventKey.createBundle instead", ReplaceWith("EventKey.createBundle(id)"))
+        fun <T : Any> bundle(id: String): EventKey<T> = createBundle(id)
     }
 }
 

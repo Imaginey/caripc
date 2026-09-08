@@ -5,7 +5,7 @@ import com.caripc.contract.*
 object ClimateContract {
     const val SERVICE_ID = "com.company.vehicle.climate"
 
-    val TARGET_TEMPERATURE = PropertyKey.float(
+    val TARGET_TEMPERATURE = PropertyKey.createFloat(
         id = "target_temperature",
         readable = true,
         writable = true,
@@ -19,7 +19,7 @@ object ClimateContract {
         )
     )
 
-    val CABIN_TEMPERATURE = PropertyKey.float(
+    val CABIN_TEMPERATURE = PropertyKey.createFloat(
         id = "cabin_temperature",
         readable = true,
         writable = false,
@@ -29,7 +29,7 @@ object ClimateContract {
         max = 80.0f
     )
 
-    val FAN_SPEED = PropertyKey.int(
+    val FAN_SPEED = PropertyKey.createInt(
         id = "fan_speed",
         readable = true,
         writable = true,
@@ -38,7 +38,7 @@ object ClimateContract {
         max = 7
     )
 
-    val SELF_TEST_FINISHED = EventKey.string("self_test_finished")
+    val SELF_TEST_FINISHED = EventKey.createString("self_test_finished")
 
     val START_SELF_TEST = CommandKey.stringToString(
         id = "start_self_test",

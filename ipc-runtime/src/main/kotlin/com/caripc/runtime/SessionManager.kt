@@ -129,7 +129,7 @@ class SessionManager(
             RequestEnvelope.OP_GET -> {
                 try {
                     permissionPolicy.authorizeOperation(session.ownerUid, serviceDescriptor.serviceId, req.capabilityId, isWrite = false)
-                    val snapshot = stateStore.readSnapshot(PropertyKey.string(req.capabilityId))
+                    val snapshot = stateStore.readSnapshot(PropertyKey.createString(req.capabilityId))
                     val payload = IpcPayload.ofAny(snapshot.value)
                     sendResponse(
                         session,

@@ -5,14 +5,14 @@ import com.caripc.contract.*
 object DisplayContract {
     const val SERVICE_ID = "com.company.launcher.display"
 
-    val CURRENT_TITLE = PropertyKey.string(
+    val CURRENT_TITLE = PropertyKey.createString(
         id = "current_title",
         readable = true,
         writable = true,
         observable = true
     )
 
-    val THEME_MODE = PropertyKey.string(
+    val THEME_MODE = PropertyKey.createString(
         id = "theme_mode",
         readable = true,
         writable = true,

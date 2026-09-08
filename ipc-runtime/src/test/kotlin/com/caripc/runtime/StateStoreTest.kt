@@ -13,7 +13,7 @@ class StateStoreTest {
     @Test
     fun testRegisterAndReadSnapshot() {
         val store = StateStore("test-inst-1")
-        val tempKey = PropertyKey.float("target_temp", min = 16f, max = 32f)
+        val tempKey = PropertyKey.createFloat("target_temp", min = 16f, max = 32f)
 
         store.registerProperty(tempKey)
         val initialSnap = store.readSnapshot(tempKey)
@@ -36,7 +36,7 @@ class StateStoreTest {
     @Test
     fun testDeadbandFilteringUpdatesStateStoreEvenWhenFiltered() {
         val store = StateStore("test-inst-2")
-        val tempKey = PropertyKey.float(
+        val tempKey = PropertyKey.createFloat(
             "target_temp",
             notificationPolicy = NotificationPolicy(minNotificationIntervalMs = 0L, minDelta = 0.5)
         )
@@ -62,7 +62,7 @@ class StateStoreTest {
     @Test
     fun testConditionalWriteAndTokenAdvancement() {
         val store = StateStore("test-inst-3")
-        val fanKey = PropertyKey.int("fan_speed", min = 0, max = 7)
+        val fanKey = PropertyKey.createInt("fan_speed", min = 0, max = 7)
         store.registerProperty(fanKey)
 
         val snap = store.readSnapshot(fanKey)
@@ -86,7 +86,7 @@ class StateStoreTest {
     @Test
     fun testRangeValidation() {
         val store = StateStore("test-inst-4")
-        val tempKey = PropertyKey.float("temp", min = 16f, max = 32f)
+        val tempKey = PropertyKey.createFloat("temp", min = 16f, max = 32f)
 
         try {
             store.update(tempKey, 10.0f)

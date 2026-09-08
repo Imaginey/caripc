@@ -20,8 +20,8 @@ class EndToEndIpcTest {
         // 1. 启动服务 B：发布空调服务
         val instanceIdB = "inst-b-1"
         val stateStoreB = StateStore(instanceIdB)
-        val tempKey = PropertyKey.float("target_temperature", min = 16f, max = 32f)
-        val fanKey = PropertyKey.int("fan_speed", min = 0, max = 7)
+        val tempKey = PropertyKey.createFloat("target_temperature", min = 16f, max = 32f)
+        val fanKey = PropertyKey.createInt("fan_speed", min = 0, max = 7)
 
         stateStoreB.registerProperty(tempKey)
         stateStoreB.registerProperty(fanKey)
@@ -191,7 +191,7 @@ class EndToEndIpcTest {
         assertEquals(ValueType.BUNDLE.typeTag, ofAnyPayload!!.typeTag)
         assertTrue(ofAnyPayload.toValue() is android.os.Bundle)
 
-        val bundleKey = PropertyKey.bundle<android.os.Bundle>("test.bundle.key")
+        val bundleKey = PropertyKey.createBundle<android.os.Bundle>("test.bundle.key")
         assertEquals(ValueType.BUNDLE, bundleKey.type)
         bundleKey.validate(bundle)
     }

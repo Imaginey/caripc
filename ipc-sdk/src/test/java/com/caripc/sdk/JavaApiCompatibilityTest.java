@@ -25,8 +25,8 @@ public class JavaApiCompatibilityTest {
     @Test
     public void testJavaContractAndApiCompilation() {
         // 1. 纯 Java 定义契约
-        PropertyKey<Float> tempKey = PropertyKey.floatKey("temp.target", true, true, true, 16.0f, 32.0f, "C", null);
-        PropertyKey<Bundle> bundleKey = PropertyKey.bundleKey("climate.bundle", true, true, true);
+        PropertyKey<Float> tempKey = PropertyKey.createFloat("temp.target", true, true, true, 16.0f, 32.0f, "C", null);
+        PropertyKey<Bundle> bundleKey = PropertyKey.createBundle("climate.bundle", true, true, true);
         CommandKey<String, String> cmdKey = CommandKey.stringToString("cmd.self_test");
 
         ServiceSchema schema = ServiceSchema.builder("com.sample.service", 1, 0)
