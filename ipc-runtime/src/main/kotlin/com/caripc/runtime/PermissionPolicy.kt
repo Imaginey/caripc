@@ -7,10 +7,23 @@ import android.os.Build
 import com.caripc.contract.ErrorCode
 import com.caripc.contract.IpcError
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 
-class PermissionPolicy(private val context: Context) {
+/**
+ * 鉴权策略。
+ *
+ * 修复要点（工单 P1-7 / P3-6）：
+ * - 不再「未配置 ACL 就静默放行」：默认放行但每次打 WARN；[strictMode] 下直接拒绝；
+ * - 共享 UID（一个 UID 关联多个包）在严格模式下拒绝，非严格模式告警，不再假装能区分真实调用应用；
+ * - 证书摘要解析对非法输入显式失败并记录日志，不再静默返回 false。
+ */
+class PermissionPolicy(
+    private val context: Context,
+    private val strictMode: Boolean = false,
+    private val aclProvider: ((serviceId: String) -> ServiceAcl?)? = null
+) {
 
-    data class ServiceAcl(
+    data class ServiceAcl @JvmOverloads constructor(
         val serviceId: String,
         val allowedPublisherPackages: Set<String> = emptySet(),
         val allowedReaderPackages: Set<String> = emptySet(),
@@ -19,10 +32,13 @@ class PermissionPolicy(private val context: Context) {
     )
 
     private val aclRules = mutableMapOf<String, ServiceAcl>()
+    private val warnedServices = ConcurrentHashMap.newKeySet<String>()
 
     fun registerAcl(acl: ServiceAcl) {
         aclRules[acl.serviceId] = acl
     }
+
+    fun isStrictMode(): Boolean = strictMode
 
     fun captureCallingUid(): Int {
         return Binder.getCallingUid()
@@ -31,7 +47,11 @@ class PermissionPolicy(private val context: Context) {
     fun getPackageName(uid: Int): String {
         return try {
             val packages = context.packageManager?.getPackagesForUid(uid)
-            packages?.firstOrNull() ?: "uid:$uid"
+            when {
+                packages == null || packages.isEmpty() -> "uid:$uid"
+                packages.size == 1 -> packages[0]
+                else -> "${packages[0]} (+${packages.size - 1} shared)"
+            }
         } catch (_: Throwable) {
             "uid:$uid"
         }
@@ -47,15 +67,15 @@ class PermissionPolicy(private val context: Context) {
     }
 
     fun authorizePublish(callingUid: Int, serviceId: String) {
-        val acl = aclRules[serviceId] ?: return // 若无特定 ACL 则允许通过
+        val acl = aclFor(serviceId)
+        if (acl == null) {
+            enforceDefaultPolicy(serviceId, "publish")
+            return
+        }
 
-        val pm = context.packageManager
-        val packages = pm.getPackagesForUid(callingUid) ?: throw IpcError(
-            ErrorCode.PERMISSION_DENIED,
-            "No packages associated with calling UID $callingUid"
-        )
+        val packages = packagesForUid(callingUid, serviceId, "publish")
 
-        // 1. 检查包名白名单
+        // 1. 包名白名单
         if (acl.allowedPublisherPackages.isNotEmpty()) {
             val hasAllowedPackage = packages.any { it in acl.allowedPublisherPackages }
             if (!hasAllowedPackage) {
@@ -66,15 +86,10 @@ class PermissionPolicy(private val context: Context) {
             }
         }
 
-        // 2. 检查证书 SHA-256 摘要
+        // 2. 证书 SHA-256
         if (!acl.requiredPublisherCertSha256.isNullOrBlank()) {
-            var certMatched = false
-            for (pkg in packages) {
-                if (checkSigningCertificateSha256(pm, pkg, acl.requiredPublisherCertSha256)) {
-                    certMatched = true
-                    break
-                }
-            }
+            val pm = context.packageManager
+            val certMatched = packages.any { checkSigningCertificateSha256(pm, it, acl.requiredPublisherCertSha256) }
             if (!certMatched) {
                 throw IpcError(
                     ErrorCode.PERMISSION_DENIED,
@@ -85,16 +100,15 @@ class PermissionPolicy(private val context: Context) {
     }
 
     fun authorizeOperation(callingUid: Int, serviceId: String, capabilityId: String, isWrite: Boolean) {
-        val acl = aclRules[serviceId] ?: return
+        val acl = aclFor(serviceId)
+        if (acl == null) {
+            enforceDefaultPolicy(serviceId, if (isWrite) "write" else "read")
+            return
+        }
         val allowedSet = if (isWrite) acl.allowedWriterPackages else acl.allowedReaderPackages
         if (allowedSet.isEmpty()) return
 
-        val pm = context.packageManager
-        val packages = pm.getPackagesForUid(callingUid) ?: throw IpcError(
-            ErrorCode.PERMISSION_DENIED,
-            "No packages for UID $callingUid"
-        )
-
+        val packages = packagesForUid(callingUid, serviceId, if (isWrite) "write" else "read")
         if (!packages.any { it in allowedSet }) {
             throw IpcError(
                 ErrorCode.PERMISSION_DENIED,
@@ -103,46 +117,93 @@ class PermissionPolicy(private val context: Context) {
         }
     }
 
-    private fun checkSigningCertificateSha256(pm: PackageManager, packageName: String, expectedSha256: String): Boolean {
+    private fun aclFor(serviceId: String): ServiceAcl? = aclProvider?.invoke(serviceId) ?: aclRules[serviceId]
+
+    /** 未配置 ACL：严格模式拒绝，否则放行但显式告警（不再静默 fail-open）。 */
+    private fun enforceDefaultPolicy(serviceId: String, operation: String) {
+        if (strictMode) {
+            throw IpcError(
+                ErrorCode.PERMISSION_DENIED,
+                "No ACL configured for $serviceId (strict permission mode denies $operation)"
+            )
+        }
+        if (warnedServices.add(serviceId)) {
+            IpcLog.w(
+                "PermissionPolicy",
+                "No ACL configured for $serviceId; $operation is allowed by default. " +
+                    "Configure ServiceAcl (or enable strictPermissionMode) to enforce access control."
+            )
+        }
+    }
+
+    private fun packagesForUid(callingUid: Int, serviceId: String, operation: String): List<String> {
+        val pm = context.packageManager
+        val packages = pm?.getPackagesForUid(callingUid)
+        if (packages.isNullOrEmpty()) {
+            throw IpcError(
+                ErrorCode.PERMISSION_DENIED,
+                "No packages associated with calling UID $callingUid"
+            )
+        }
+        if (packages.size > 1) {
+            val message = "UID $callingUid is shared by ${packages.size} packages (${packages.joinToString()}); " +
+                "caller identity cannot be distinguished"
+            if (strictMode) {
+                throw IpcError(ErrorCode.PERMISSION_DENIED, "$message; $operation denied in strict mode")
+            }
+            IpcLog.w("PermissionPolicy", "$message; $operation to $serviceId allowed by default")
+        }
+        return packages.toList()
+    }
+
+    private fun checkSigningCertificateSha256(pm: PackageManager?, packageName: String, expectedSha256: String): Boolean {
+        if (pm == null) return false
+        val expectedHex = expectedSha256.replace(":", "").trim().lowercase()
+        val expectedBytes = hexStringToByteArray(expectedHex) ?: run {
+            IpcLog.e("PermissionPolicy", "Invalid SHA-256 hex for certificate check on $packageName: '$expectedSha256'")
+            return false
+        }
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val hexClean = expectedSha256.replace(":", "").lowercase()
-                val bytes = hexStringToByteArray(hexClean)
-                if (pm.hasSigningCertificate(packageName, bytes, 1 /* CERT_INPUT_SHA256_DIGEST */)) {
+                if (pm.hasSigningCertificate(packageName, expectedBytes, 1 /* CERT_INPUT_SHA256_DIGEST */)) {
                     return true
                 }
             }
             // 回退兼容方案
             @Suppress("DEPRECATION")
             val info = pm.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
-            val signatures = info.signatures ?: return false
+            val signatures = info?.signatures ?: return false
             for (sig in signatures) {
                 val md = MessageDigest.getInstance("SHA-256")
-                val digest = md.digest(sig.toByteArray())
-                val hex = bytesToHex(digest)
-                if (hex.equals(expectedSha256.replace(":", ""), ignoreCase = true)) {
+                val hex = bytesToHex(md.digest(sig.toByteArray()))
+                if (hex.equals(expectedHex, ignoreCase = true)) {
                     return true
                 }
             }
         } catch (e: Exception) {
+            IpcLog.w("PermissionPolicy", "Certificate check failed for $packageName: ${e.message}")
             return false
         }
         return false
     }
 
-    private fun hexStringToByteArray(s: String): ByteArray {
-        val len = s.length
-        val data = ByteArray(len / 2)
+    /** 非法输入返回 null（不再因为奇数长度静默抛异常被吞）。 */
+    private fun hexStringToByteArray(s: String): ByteArray? {
+        if (s.isEmpty() || s.length % 2 != 0) return null
+        val data = ByteArray(s.length / 2)
         var i = 0
-        while (i < len) {
-            data[i / 2] = ((Character.digit(s[i], 16) shl 4) + Character.digit(s[i + 1], 16)).toByte()
+        while (i < s.length) {
+            val high = Character.digit(s[i], 16)
+            val low = Character.digit(s[i + 1], 16)
+            if (high < 0 || low < 0) return null
+            data[i / 2] = ((high shl 4) + low).toByte()
             i += 2
         }
         return data
     }
 
     private fun bytesToHex(bytes: ByteArray): String {
-        val sb = StringBuilder()
+        val sb = StringBuilder(bytes.size * 2)
         for (b in bytes) {
             sb.append(String.format("%02x", b))
         }

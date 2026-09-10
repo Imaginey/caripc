@@ -261,40 +261,82 @@ com.company.launcher.display
 ### 5.2 契约示例
 
 ```kotlin
-// API 设计示例：类型与工厂函数由 SDK 实现。
+// API 设计示例：统一双端工厂方法，无需手写 AIDL
 object ClimateContract {
     const val SERVICE_ID = "com.company.vehicle.climate"
 
-    val TARGET_TEMPERATURE = PropertyKey.float(
+    // 属性：目标温度，支持边界约束与死区限频过滤
+    val TARGET_TEMPERATURE = PropertyKey.createFloat(
         id = "target_temperature",
         readable = true,
         writable = true,
         observable = true,
         unit = "celsius",
         min = 16.0f,
-        max = 32.0f
+        max = 32.0f,
+        notificationPolicy = NotificationPolicy(
+            minDelta = 0.5,                  // 死区：数值变动 >= 0.5 才下发通知
+            minNotificationIntervalMs = 50L  // 限频：通知间隔不低于 50ms
+        )
     )
 
-    val FAN_SPEED = PropertyKey.int(
-        id = "fan_speed", readable = true,
-        writable = true, observable = true, min = 0, max = 7
+    // 属性：车内实测温度（只读）
+    val CABIN_TEMPERATURE = PropertyKey.createFloat(
+        id = "cabin_temperature",
+        readable = true,
+        writable = false,
+        observable = true,
+        unit = "celsius",
+        min = -40.0f,
+        max = 80.0f
     )
 
-    val SELF_TEST_FINISHED = EventKey.record(
-        id = "self_test_finished", codec = SelfTestResultCodec
+    // 属性：风速
+    val FAN_SPEED = PropertyKey.createInt(
+        id = "fan_speed",
+        readable = true,
+        writable = true,
+        observable = true,
+        min = 0,
+        max = 7
     )
 
-    val START_SELF_TEST = CommandKey.unitToRecord(
-        id = "start_self_test", responseCodec = JobReceiptCodec,
+    // 复杂数据容器原生支持：Bundle 属性
+    val CLIMATE_SETTINGS_BUNDLE = PropertyKey.createBundle<android.os.Bundle>(
+        id = "climate_settings_bundle",
+        readable = true,
+        writable = true
+    )
+
+    // 单向事件广播
+    val SELF_TEST_FINISHED = EventKey.createString("self_test_finished")
+
+    // 双向 RPC 命令：自检命令
+    val START_SELF_TEST = CommandKey.stringToString(
+        id = "start_self_test",
         retryPolicy = RetryPolicy.NEVER
     )
 
-    val schema = ServiceSchema(
-        contractId = "vehicle.climate", major = 1, minor = 0,
-        properties = listOf(TARGET_TEMPERATURE, FAN_SPEED),
-        events = listOf(SELF_TEST_FINISHED),
-        commands = listOf(START_SELF_TEST)
+    // 复杂 RPC 命令：入参和出参均为 Bundle
+    val EXECUTE_PROFILE_CMD = CommandKey.bundleToBundle<android.os.Bundle, android.os.Bundle>(
+        id = "execute_profile_cmd",
+        retryPolicy = RetryPolicy.NEVER
     )
+
+    // 聚合定义 ServiceSchema（支持链式构造）
+    @JvmField
+    val SCHEMA = ServiceSchema.builder(SERVICE_ID, major = 1, minor = 0)
+        .addProperty(TARGET_TEMPERATURE)
+        .addProperty(CABIN_TEMPERATURE)
+        .addProperty(FAN_SPEED)
+        .addProperty(CLIMATE_SETTINGS_BUNDLE)
+        .addCommand(START_SELF_TEST)
+        .addCommand(EXECUTE_PROFILE_CMD)
+        .addEvent(SELF_TEST_FINISHED)
+        .build()
+
+    /** 兼容 Kotlin 习惯的小写访问器 */
+    val schema: ServiceSchema get() = SCHEMA
 }
 ```
 
@@ -373,7 +415,7 @@ val ipc = CarIpc.create(applicationContext, ipcConfig)
 
 val service = ipc.publishService(
     serviceId = ClimateContract.SERVICE_ID,
-    schema = ClimateContract.schema
+    schema = ClimateContract.SCHEMA
 ) {
     onSet(ClimateContract.TARGET_TEMPERATURE) { value, caller ->
         climateManager.checkControlAllowed(caller)

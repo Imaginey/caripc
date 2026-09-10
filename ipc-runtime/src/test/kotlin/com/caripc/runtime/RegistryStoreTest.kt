@@ -45,7 +45,7 @@ class RegistryStoreTest {
 
         // 验证 resolveAndWatch 原子快照返回
         val snapshotDiscovered = AtomicBoolean(false)
-        store.resolveAndWatch("com.test.service", 1L, object : IRegistryCallback.Stub() {
+        store.resolveAndWatch(10001, "com.test.service", 1L, object : IRegistryCallback.Stub() {
             override fun onPublished(token: RegistrationToken?) {}
             override fun onPublishFailed(svcId: String?, error: ErrorEnvelope?) {}
             override fun onSnapshot(svcId: String?, wId: Long, d: ServiceDescriptor?, e: IEndpoint?) {

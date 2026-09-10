@@ -40,10 +40,18 @@ enum class CompletionState {
     UNKNOWN
 }
 
-data class IpcError(
+/**
+ * 中间件统一错误载体。
+ *
+ * 继承 [RuntimeException]（非受检）：它主要作为异步回调的错误载荷与内部信号使用，
+ * 列入方法签名会给 Java 调用方带来纯噪音。需要显式处理时仍可 try/catch。
+ *
+ * @JvmOverloads 让 Java 可以 `new IpcError(ErrorCode.X, "msg")` 两参构造，无需写满全部字段。
+ */
+data class IpcError @JvmOverloads constructor(
     val code: ErrorCode,
     override val message: String,
     val requestId: String? = null,
     val completionState: CompletionState = CompletionState.UNKNOWN,
     val currentWriteToken: String? = null
-) : Exception("[$code] $message (req=$requestId, state=$completionState)")
+) : RuntimeException("[$code] $message (req=$requestId, state=$completionState)")

@@ -6,6 +6,7 @@ import com.caripc.sdk.RemoteService
 import com.caripc.sdk.ServicePublisher
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -56,17 +57,39 @@ suspend fun <Req : Any, Resp : Any> RemoteService.call(command: CommandKey<Req, 
     }
 }
 
+/**
+ * 把订阅包装成 Flow。
+ *
+ * 消费慢于生产时不能静默丢帧：这里给出显式缓冲，并在缓冲写失败时尽力投递一条
+ * [SubscriptionGap]，让收集方知道发生了丢弃（见工单 P2-10）。
+ */
 fun RemoteService.observe(
     keys: List<CapabilityKey>,
     options: SubscribeOptions = SubscribeOptions()
 ): Flow<SubscriptionMessage> = callbackFlow {
     val handle = subscribe(keys, options) { msg ->
-        trySend(msg)
+        val sent = trySend(msg)
+        if (sent.isFailure) {
+            val gap = object : SubscriptionMessage {
+                override val subscriptionId: String = msg.subscriptionId
+                override val serviceInstanceId: String = msg.serviceInstanceId
+                override val payload: SubscriptionMessagePayload = SubscriptionGap(
+                    msg.subscriptionId,
+                    -1L,
+                    -1L,
+                    "flow buffer full; one or more messages were dropped on the client side"
+                )
+            }
+            trySend(gap)
+        }
     }
     awaitClose {
         handle.cancel()
     }
-}
+}.buffer(capacity = OBSERVE_BUFFER_CAPACITY)
+
+/** observe() 的显式缓冲容量；超出即丢弃并上报缺口。 */
+const val OBSERVE_BUFFER_CAPACITY: Int = 256
 
 class ServiceBuilder(val schema: ServiceSchema) {
     private val setHandlers = mutableMapOf<String, (value: Any?, callerUid: Int) -> SetReceipt>()

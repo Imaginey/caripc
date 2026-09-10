@@ -12,7 +12,13 @@ enum class ValueType(val typeTag: Int) {
     STRING(6),
     BYTES(7),
     RECORD(8),
-    BUNDLE(9);
+    BUNDLE(9),
+
+    /**
+     * 显式「无返回值」负载。用于声明 void / Unit 语义的命令：
+     * 成功返回空结果与「类型不匹配」必须可区分，不能让 null 同时表达两件事。
+     */
+    NULL(10);
 
     companion object {
         @JvmStatic

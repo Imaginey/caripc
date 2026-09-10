@@ -63,6 +63,9 @@ data class PropertyKey<T : Any>(
             }
             ValueType.RECORD -> Unit
             ValueType.BUNDLE -> Unit
+            ValueType.NULL -> {
+                if (value != Unit) throw IllegalArgumentException("Expected Unit for key $id, got ${value::class.java}")
+            }
         }
     }
 
@@ -202,5 +205,23 @@ data class CommandKey<Req : Any, Resp : Any>(
         @JvmOverloads
         fun <Req : Any, Resp : Any> bundleToBundle(id: String, retryPolicy: RetryPolicy = RetryPolicy.NEVER): CommandKey<Req, Resp> =
             CommandKey(id, ValueType.BUNDLE, ValueType.BUNDLE, retryPolicy)
+
+        /** 无入参、无返回值的命令（void / Unit 语义）。 */
+        @JvmStatic
+        @JvmOverloads
+        fun createUnit(id: String, retryPolicy: RetryPolicy = RetryPolicy.NEVER): CommandKey<Unit, Unit> =
+            CommandKey(id, ValueType.NULL, ValueType.NULL, retryPolicy)
+
+        /** 有字符串入参、无返回值的命令。 */
+        @JvmStatic
+        @JvmOverloads
+        fun stringToUnit(id: String, retryPolicy: RetryPolicy = RetryPolicy.NEVER): CommandKey<String, Unit> =
+            CommandKey(id, ValueType.STRING, ValueType.NULL, retryPolicy)
+
+        /** 无入参、返回字符串的命令。 */
+        @JvmStatic
+        @JvmOverloads
+        fun unitToString(id: String, retryPolicy: RetryPolicy = RetryPolicy.NEVER): CommandKey<Unit, String> =
+            CommandKey(id, ValueType.NULL, ValueType.STRING, retryPolicy)
     }
 }

@@ -2,6 +2,7 @@ package com.caripc.runtime
 
 import android.os.Binder
 import com.caripc.contract.ErrorCode
+import com.caripc.contract.IpcError
 import com.caripc.protocol.*
 
 class EndpointHost(
@@ -14,51 +15,81 @@ class EndpointHost(
         val callingUid = Binder.getCallingUid()
         IpcLog.i("EndpointHost", "openSession() requested by UID $callingUid, clientInstanceId=${hello.clientInstanceId}")
 
-        // 校验传输版本兼容性
+        val descriptor = sessionManager.serviceDescriptor
+
+        // 传输版本：主版本必须一致
         if (hello.transportMajor != transportMajor) {
-            IpcLog.w("EndpointHost", "Session rejected: version mismatch (server=$transportMajor, client=${hello.transportMajor})")
-            try {
-                callback.onSessionRejected(
-                    ErrorEnvelope(
-                        ErrorCode.VERSION_MISMATCH.code,
-                        "Incompatible transport version: server=$transportMajor, client=${hello.transportMajor}",
-                        hello.openRequestId,
-                        0,
-                        null
-                    )
+            reject(
+                hello,
+                callback,
+                IpcError(
+                    ErrorCode.VERSION_MISMATCH,
+                    "Incompatible transport version: server=$transportMajor, client=${hello.transportMajor}",
+                    hello.openRequestId
                 )
-            } catch (_: Exception) {}
+            )
+            return
+        }
+        // 契约版本：主版本一致、客户端次版本不得高于服务端（工单 P1-9）
+        if (hello.contractMajor != descriptor.contractMajor) {
+            reject(
+                hello,
+                callback,
+                IpcError(
+                    ErrorCode.VERSION_MISMATCH,
+                    "Incompatible contract major: server=${descriptor.contractMajor}, client=${hello.contractMajor}",
+                    hello.openRequestId
+                )
+            )
+            return
+        }
+        if (hello.contractMinor > descriptor.contractMinor) {
+            reject(
+                hello,
+                callback,
+                IpcError(
+                    ErrorCode.VERSION_MISMATCH,
+                    "Client contract minor ${hello.contractMinor} is newer than server ${descriptor.contractMinor}",
+                    hello.openRequestId
+                )
+            )
             return
         }
 
         try {
-            val sessionStub = sessionManager.createSession(callingUid, hello, callback)
+            val created = sessionManager.createSession(callingUid, hello, callback)
             val serverHello = ServerHello(
                 transportMajor,
                 transportMinor,
-                sessionManager.serviceDescriptor.contractMajor,
-                sessionManager.serviceDescriptor.contractMinor,
-                sessionManager.serviceDescriptor.instanceId,
-                sessionManager.serviceDescriptor.serviceId,
-                sessionManager.serviceDescriptor.capabilities,
+                descriptor.contractMajor,
+                descriptor.contractMinor,
+                descriptor.instanceId,
+                created.sessionId,
+                descriptor.capabilities,
                 IpcPayload.MAX_PAYLOAD_BYTES,
-                16
+                SessionManager.SUPPORTED_ACK_WINDOW
             )
-            IpcLog.i("EndpointHost", "openSession() succeeded for service ${sessionManager.serviceDescriptor.serviceId} to UID $callingUid")
-            callback.onSessionOpened(serverHello, sessionStub)
+            IpcLog.i(
+                "EndpointHost",
+                "openSession() succeeded for service ${descriptor.serviceId} to UID $callingUid (sessionId=${created.sessionId}, ackWindow=${SessionManager.SUPPORTED_ACK_WINDOW})"
+            )
+            callback.onSessionOpened(serverHello, created.session)
         } catch (e: Exception) {
-            IpcLog.e("EndpointHost", "openSession() exception for UID $callingUid", e)
-            try {
-                callback.onSessionRejected(
-                    ErrorEnvelope(
-                        ErrorCode.INTERNAL_ERROR.code,
-                        e.message ?: "Failed to open session",
-                        hello.openRequestId,
-                        0,
-                        null
-                    )
-                )
-            } catch (_: Exception) {}
+            val error = e as? IpcError ?: IpcError(
+                ErrorCode.INTERNAL_ERROR,
+                e.message ?: "Failed to open session",
+                hello.openRequestId
+            )
+            IpcLog.e("EndpointHost", "openSession() failed for UID $callingUid: ${error.message}", e)
+            reject(hello, callback, error)
+        }
+    }
+
+    private fun reject(hello: ClientHello, callback: IClientCallback, error: IpcError) {
+        IpcLog.w("EndpointHost", "Session rejected: ${error.message}")
+        try {
+            callback.onSessionRejected(ErrorEnvelope(error))
+        } catch (_: Exception) {
         }
     }
 }

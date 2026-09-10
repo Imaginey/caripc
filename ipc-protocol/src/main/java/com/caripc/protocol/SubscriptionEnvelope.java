@@ -23,6 +23,8 @@ public final class SubscriptionEnvelope implements Parcelable {
     public final int snapshotIndex;
     public final boolean isSnapshotEnd;
     public final ErrorEnvelope error;
+    /** 仅 KIND_GAP 有效：缺口起始序号（该序号及之前的消息已不完整）。无缺口时为 -1。 */
+    public final long gapFromSeq;
 
     public SubscriptionEnvelope(
             String subscriptionId,
@@ -40,6 +42,27 @@ public final class SubscriptionEnvelope implements Parcelable {
             boolean isSnapshotEnd,
             ErrorEnvelope error
     ) {
+        this(subscriptionId, serviceInstanceId, kind, capabilityId, deliverySeq, revision, payload, quality,
+                sourceElapsedMs, causeOperationId, snapshotId, snapshotIndex, isSnapshotEnd, error, -1L);
+    }
+
+    public SubscriptionEnvelope(
+            String subscriptionId,
+            String serviceInstanceId,
+            int kind,
+            String capabilityId,
+            long deliverySeq,
+            long revision,
+            IpcPayload payload,
+            int quality,
+            long sourceElapsedMs,
+            String causeOperationId,
+            String snapshotId,
+            int snapshotIndex,
+            boolean isSnapshotEnd,
+            ErrorEnvelope error,
+            long gapFromSeq
+    ) {
         this.subscriptionId = subscriptionId;
         this.serviceInstanceId = serviceInstanceId;
         this.kind = kind;
@@ -54,6 +77,7 @@ public final class SubscriptionEnvelope implements Parcelable {
         this.snapshotIndex = snapshotIndex;
         this.isSnapshotEnd = isSnapshotEnd;
         this.error = error;
+        this.gapFromSeq = gapFromSeq;
     }
 
     private SubscriptionEnvelope(Parcel in) {
@@ -71,6 +95,7 @@ public final class SubscriptionEnvelope implements Parcelable {
         snapshotIndex = in.readInt();
         isSnapshotEnd = in.readByte() != 0;
         error = in.readParcelable(ErrorEnvelope.class.getClassLoader());
+        gapFromSeq = in.readLong();
     }
 
     @Override
@@ -89,6 +114,7 @@ public final class SubscriptionEnvelope implements Parcelable {
         dest.writeInt(snapshotIndex);
         dest.writeByte((byte) (isSnapshotEnd ? 1 : 0));
         dest.writeParcelable(error, flags);
+        dest.writeLong(gapFromSeq);
     }
 
     @Override

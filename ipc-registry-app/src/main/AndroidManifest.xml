@@ -1,18 +1,31 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.caripc.registry">
 
+    <!--
+      规格 15.1 要求注册中心访问权限为 signature 级：
+      normal 级权限安装即自动授予，等于对任何应用开放注册中心。
+      集成时必须用同一签名证书构建注册中心与业务应用。
+    -->
     <permission
         android:name="com.caripc.permission.ACCESS_REGISTRY"
-        android:protectionLevel="normal" />
+        android:protectionLevel="signature" />
 
     <uses-permission android:name="com.caripc.permission.ACCESS_REGISTRY" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!--
+      注意：android:persistent 只对预置到系统分区/平台签名的应用生效，
+      三方 APK 上声明它是无效的（不要用它假装保活）。是否常驻由集成层决定。
+    -->
     <application
         android:label="CarIpc Registry"
-        android:persistent="true"
         android:allowBackup="false">
+
+        <meta-data
+            android:name="com.caripc.registry.STRICT_PERMISSION_MODE"
+            android:value="false" />
+
         <service
             android:name=".RegistryService"
             android:exported="true"

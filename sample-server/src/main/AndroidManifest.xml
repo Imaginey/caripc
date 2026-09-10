@@ -11,7 +11,6 @@
 
     <application
         android:label="CarIpc Climate Server"
-        android:persistent="true"
         android:allowBackup="false">
         <service
             android:name=".ClimateServerService"

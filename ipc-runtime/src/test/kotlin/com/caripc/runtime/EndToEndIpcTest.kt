@@ -156,7 +156,7 @@ class EndToEndIpcTest {
             android.os.Binder.getCallingUid(),
             ClientHello(1, 0, 1, 0, "client-cmd", UUID.randomUUID().toString()),
             callCallback
-        )
+        ).session
         sessionStub.request(
             RequestEnvelope(
                 "cmd-1",

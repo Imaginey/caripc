@@ -3,10 +3,20 @@ package com.caripc.protocol;
 import android.os.Bundle;
 import android.os.Parcel;
 import android.os.Parcelable;
+import com.caripc.contract.CompletionState;
+import com.caripc.contract.ErrorCode;
+import com.caripc.contract.IpcError;
 import com.caripc.contract.ValueType;
 
+/**
+ * 线协议负载。
+ *
+ * <p>超限统一抛出 {@link IpcError}（PAYLOAD_LARGE / INVALID_ARGUMENT），
+ * 而不是裸 {@link IllegalArgumentException}，以便调用方把它转成业务可见的错误回调；
+ * 「无返回值」用 {@link ValueType#NULL} 显式表达，避免与「类型不匹配」混为一谈。</p>
+ */
 public final class IpcPayload implements Parcelable {
-    public static final int MAX_PAYLOAD_BYTES = 64 * 1024; // 64 KiB limit
+    public static final int MAX_PAYLOAD_BYTES = 64 * 1024; // 64 KiB limit（UTF-8 字节估算）
 
     public final int typeTag;
     public final boolean booleanVal;
@@ -29,14 +39,38 @@ public final class IpcPayload implements Parcelable {
         this.longVal = longVal;
         this.floatVal = floatVal;
         this.doubleVal = doubleVal;
-        if (stringVal != null && stringVal.length() > MAX_PAYLOAD_BYTES) {
-            throw new IllegalArgumentException("Payload string exceeds max bytes");
+        if (stringVal != null) {
+            int size = utf8Length(stringVal);
+            if (size > MAX_PAYLOAD_BYTES) {
+                throw new IpcError(
+                        ErrorCode.PAYLOAD_LARGE,
+                        "Payload string size " + size + " bytes exceeds max " + MAX_PAYLOAD_BYTES + " bytes",
+                        null,
+                        CompletionState.NOT_EXECUTED,
+                        null);
+            }
         }
         this.stringVal = stringVal;
         if (bytesVal != null && bytesVal.length > MAX_PAYLOAD_BYTES) {
-            throw new IllegalArgumentException("Payload bytes exceed max bytes");
+            throw new IpcError(
+                    ErrorCode.PAYLOAD_LARGE,
+                    "Payload bytes size " + bytesVal.length + " exceeds max " + MAX_PAYLOAD_BYTES + " bytes",
+                    null,
+                    CompletionState.NOT_EXECUTED,
+                    null);
         }
         this.bytesVal = bytesVal;
+        if (bundleVal != null) {
+            int size = bundleByteSize(bundleVal);
+            if (size > MAX_PAYLOAD_BYTES) {
+                throw new IpcError(
+                        ErrorCode.PAYLOAD_LARGE,
+                        "Payload bundle size " + size + " bytes exceeds max " + MAX_PAYLOAD_BYTES + " bytes",
+                        null,
+                        CompletionState.NOT_EXECUTED,
+                        null);
+            }
+        }
         this.bundleVal = bundleVal;
     }
 
@@ -84,8 +118,14 @@ public final class IpcPayload implements Parcelable {
         return new IpcPayload(ValueType.BUNDLE.getTypeTag(), false, 0, 0L, 0f, 0d, null, null, value);
     }
 
+    /** 显式「无返回值」负载（void / Unit 命令的成功结果）。 */
+    public static IpcPayload ofNull() {
+        return new IpcPayload(ValueType.NULL.getTypeTag(), false, 0, 0L, 0f, 0d, null, null, null);
+    }
+
     public static IpcPayload ofAny(Object value) {
         if (value == null) return null;
+        if (value == kotlin.Unit.INSTANCE) return ofNull();
         if (value instanceof Boolean) return ofBoolean((Boolean) value);
         if (value instanceof Integer) return ofInt((Integer) value);
         if (value instanceof Long) return ofLong((Long) value);
@@ -94,7 +134,12 @@ public final class IpcPayload implements Parcelable {
         if (value instanceof String) return ofString((String) value);
         if (value instanceof byte[]) return ofBytes((byte[]) value);
         if (value instanceof Bundle) return ofBundle((Bundle) value);
-        throw new IllegalArgumentException("Unsupported value type: " + value.getClass().getName());
+        throw new IpcError(
+                ErrorCode.INVALID_ARGUMENT,
+                "Unsupported value type: " + value.getClass().getName(),
+                null,
+                CompletionState.NOT_EXECUTED,
+                null);
     }
 
     public Object toValue() {
@@ -106,7 +151,63 @@ public final class IpcPayload implements Parcelable {
         if (typeTag == ValueType.STRING.getTypeTag()) return stringVal;
         if (typeTag == ValueType.BYTES.getTypeTag()) return bytesVal;
         if (typeTag == ValueType.BUNDLE.getTypeTag()) return bundleVal;
+        if (typeTag == ValueType.NULL.getTypeTag()) return null;
         throw new IllegalStateException("Unknown type tag: " + typeTag);
+    }
+
+    /** 本负载在传输上的近似字节数，用于与对端协商的 maxPayloadBytes 比对。 */
+    public int byteSize() {
+        if (typeTag == ValueType.STRING.getTypeTag()) return stringVal != null ? utf8Length(stringVal) : 0;
+        if (typeTag == ValueType.BYTES.getTypeTag()) return bytesVal != null ? bytesVal.length : 0;
+        if (typeTag == ValueType.BUNDLE.getTypeTag()) return bundleVal != null ? bundleByteSize(bundleVal) : 0;
+        if (typeTag == ValueType.NULL.getTypeTag()) return 0;
+        return 8;
+    }
+
+    /** UTF-8 字节数，超限即提前返回，避免为超长字符串分配副本。 */
+    private static int utf8Length(String s) {
+        int len = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c < 0x80) {
+                len += 1;
+            } else if (c < 0x800) {
+                len += 2;
+            } else if (Character.isHighSurrogate(c) && i + 1 < s.length() && Character.isLowSurrogate(s.charAt(i + 1))) {
+                len += 4;
+                i++;
+            } else {
+                len += 3;
+            }
+            if (len > MAX_PAYLOAD_BYTES) return len;
+        }
+        return len;
+    }
+
+    /**
+     * 用 Parcel 试写一次得到 Bundle 的真实尺寸。
+     * 单元测试（android.jar stub，Parcel.obtain() 返回 null）下跳过检查。
+     */
+    private static int bundleByteSize(Bundle bundle) {
+        Parcel parcel = Parcel.obtain();
+        if (parcel == null) return 0;
+        try {
+            parcel.writeBundle(bundle);
+            return parcel.dataSize();
+        } catch (RuntimeException e) {
+            throw new IpcError(
+                    ErrorCode.INVALID_ARGUMENT,
+                    "Bundle payload cannot be marshalled: " + e.getMessage(),
+                    null,
+                    CompletionState.NOT_EXECUTED,
+                    null);
+        } finally {
+            try {
+                parcel.recycle();
+            } catch (RuntimeException ignored) {
+                // 忽略回收异常
+            }
+        }
     }
 
     @Override

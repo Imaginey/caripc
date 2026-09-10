@@ -1,11 +1,12 @@
 package com.caripc.sample.climate
 
 import com.caripc.contract.*
+import kotlin.jvm.JvmField
 
 object ClimateContract {
     const val SERVICE_ID = "com.company.vehicle.climate"
 
-    val TARGET_TEMPERATURE = PropertyKey.createFloat(
+    @JvmField val TARGET_TEMPERATURE = PropertyKey.createFloat(
         id = "target_temperature",
         readable = true,
         writable = true,
@@ -19,7 +20,7 @@ object ClimateContract {
         )
     )
 
-    val CABIN_TEMPERATURE = PropertyKey.createFloat(
+    @JvmField val CABIN_TEMPERATURE = PropertyKey.createFloat(
         id = "cabin_temperature",
         readable = true,
         writable = false,
@@ -29,7 +30,7 @@ object ClimateContract {
         max = 80.0f
     )
 
-    val FAN_SPEED = PropertyKey.createInt(
+    @JvmField val FAN_SPEED = PropertyKey.createInt(
         id = "fan_speed",
         readable = true,
         writable = true,
@@ -38,14 +39,14 @@ object ClimateContract {
         max = 7
     )
 
-    val SELF_TEST_FINISHED = EventKey.createString("self_test_finished")
+    @JvmField val SELF_TEST_FINISHED = EventKey.createString("self_test_finished")
 
-    val START_SELF_TEST = CommandKey.stringToString(
+    @JvmField val START_SELF_TEST = CommandKey.stringToString(
         id = "start_self_test",
         retryPolicy = RetryPolicy.NEVER
     )
 
-    val schema = ServiceSchema(
+    @JvmField val SCHEMA = ServiceSchema(
         contractId = "vehicle.climate",
         major = 1,
         minor = 0,
@@ -53,4 +54,7 @@ object ClimateContract {
         events = listOf(SELF_TEST_FINISHED),
         commands = listOf(START_SELF_TEST)
     )
+
+    /** 兼容 Kotlin 习惯与文档示例的小写访问器 */
+    val schema: ServiceSchema get() = SCHEMA
 }

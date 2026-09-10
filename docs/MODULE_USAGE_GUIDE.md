@@ -210,7 +210,7 @@ val ipc = CarIpc.create(context)
 // 使用 DSL 声明式发布服务
 val publisher = ipc.publishService(
     serviceId = ClimateContract.SERVICE_ID,
-    schema = ClimateContract.schema
+    schema = ClimateContract.SCHEMA
 ) {
     // 1. 处理客户端属性修改请求（set）
     onSet(ClimateContract.TARGET_TEMPERATURE) { targetTemp, callerUid ->
@@ -297,12 +297,26 @@ climateClient.call(ClimateContract.START_SELF_TEST, "CHECK_SENSOR") { res ->
 #### (5) 多 Key 状态与事件订阅 (`subscribe`)
 ```kotlin
 val subHandle = climateClient.subscribe(
-    keys = listOf(ClimateContract.TARGET_TEMPERATURE, ClimateContract.FAN_SPEED),
-    options = SubscribeOptions(replayLatest = true) // replayLatest = true 会先原子重放一份当前最新快照
+    keys = listOf(ClimateContract.TARGET_TEMPERATURE, ClimateContract.SELF_TEST_FINISHED),
+    options = SubscribeOptions(replayLatest = true) // replayLatest = true 会先原子重放属性的当前最新快照
 ) { message ->
-    val prop = message.payload as? PropertyUpdate<*>
-    if (prop != null) {
-        println("收到属性变更: ${prop.key.id} -> ${prop.snapshot.value}")
+    when (val payload = message.payload) {
+        // 1. 属性变更通知（或初始快照）
+        is PropertyUpdate<*> -> {
+            println("收到属性变更: ${payload.key.id} -> ${payload.snapshot.value} (版本: ${payload.snapshot.revision})")
+        }
+        // 2. 单向事件广播通知
+        is EventEmission -> {
+            println("收到事件广播: ${payload.key.id} -> 负载: ${payload.eventData}, 序号: ${payload.deliverySeq}")
+        }
+        // 3. 消息丢包/空隙告警（极罕见情况下服务端压垮时的丢包提示）
+        is SubscriptionGap -> {
+            System.err.println("检测到消息序号跳跃，建议重新拉取基准快照")
+        }
+        // 4. 订阅错误
+        is SubscriptionErrorMessage -> {
+            System.err.println("订阅通道异常: ${payload.error.message}")
+        }
     }
 }
 
@@ -351,7 +365,7 @@ class VehicleServiceManager(context: Context) {
 
     fun start() {
         // 角色 1: 作为服务端，发布当前进程负责的显示能力
-        val displayPublisher = ipc.publishService(DisplayContract.SERVICE_ID, DisplayContract.schema) {
+        val displayPublisher = ipc.publishService(DisplayContract.SERVICE_ID, DisplayContract.SCHEMA) {
             onSet(DisplayContract.CURRENT_TITLE) { title, _ ->
                 println("更新标题: $title")
                 SetReceipt.accepted()
@@ -378,49 +392,45 @@ class VehicleServiceManager(context: Context) {
 中间件底层经过了高度的 Java 互操作（Java Interop）设计与对齐，**纯 Java 开发的应用无需依赖 Kotlin 协程/扩展库，只需引入标准 Jar/AAR 即可享有与 Kotlin 完全等价的完整功能**。
 
 #### (1) 依赖配置
-纯 Java 业务工程只需引入 `:ipc-contract-api` 与 `:ipc-sdk`，无需引入 `:ipc-sdk-ktx`：
+纯 Java 业务工程引入 SDK 与**现成的契约模块**即可，无需引入 `:ipc-sdk-ktx`（那是 Kotlin 协程/DSL 专属）：
 ```groovy
 // build.gradle (Java Module)
 dependencies {
     implementation project(':ipc-contract-api')
     implementation project(':ipc-sdk')
+    implementation project(':climate-contract')   // 契约模块（示例：空调），直接引用
 }
 ```
 
-#### (2) 契约定义 (纯 Java)
-使用契约工厂方法与 `ServiceSchema.builder()` 构建契约，完美避免 Java 关键字冲突：
+#### (2) 契约：直接引用，无需重复定义
+契约集中在契约模块里**定义一次**，业务应用（Java / Kotlin 都一样）只引用常量、不重写：
+
 ```java
-package com.company.vehicle.contract;
+import com.caripc.sample.climate.ClimateContract;   // 契约模块已定义好的常量（@JvmField 静态字段）
 
-import android.os.Bundle;
-import com.caripc.contract.*;
-
-public final class ClimateContract {
-    public static final String SERVICE_ID = "com.company.vehicle.climate";
-
-    // 属性定义：双端完全一致采用 PropertyKey.createXxx 工厂方法
-    public static final PropertyKey<Float> TARGET_TEMPERATURE = PropertyKey.createFloat("target_temperature", 16.0f, 32.0f);
-    public static final PropertyKey<Integer> FAN_SPEED = PropertyKey.createInt("fan_speed", 0, 7);
-    public static final PropertyKey<Bundle> CLIMATE_BUNDLE = PropertyKey.createBundle("climate_bundle");
-
-    // 命令定义
-    public static final CommandKey<String, String> START_SELF_TEST = CommandKey.stringToString("start_self_test");
-
-    // 契约 Schema 聚合
-    public static final ServiceSchema SCHEMA = ServiceSchema.builder(SERVICE_ID, 1, 0)
-            .addProperty(TARGET_TEMPERATURE)
-            .addProperty(FAN_SPEED)
-            .addProperty(CLIMATE_BUNDLE)
-            .addCommand(START_SELF_TEST)
-            .build();
-
-    private ClimateContract() {}
-}
+PropertyKey<Float>    tempKey = ClimateContract.TARGET_TEMPERATURE;
+PropertyKey<Integer>  fanKey  = ClimateContract.FAN_SPEED;
+ServiceSchema         schema  = ClimateContract.SCHEMA;
 ```
+
+> 只有当你需要**新建自己的契约模块**（而不是复用现成的 `climate-contract`）时，才需要在纯 Java 里用工厂方法定义一次。参数顺序为 `(id, readable, writable, observable, min, max, unit, notificationPolicy)`：
+> ```java
+> public final class MyContract {
+>     public static final PropertyKey<Float> TEMP =
+>             PropertyKey.createFloat("temp", true, true, true, 16.0f, 32.0f, "C", null);
+>     public static final ServiceSchema SCHEMA =
+>             ServiceSchema.builder("my.contract", 1, 0).addProperty(TEMP).build();
+>     private MyContract() {}
+> }
+> ```
 
 #### (3) 服务端发布 (纯 Java)
-通过 `CarIpc.publishService` 结合 Java Lambda 注册 Handler：
+通过 `CarIpc.publishService` 结合 Java Lambda 注册 Handler（`ClimateContract` 来自上面引用的契约模块）：
 ```java
+import com.caripc.sample.climate.ClimateContract;
+import com.caripc.sdk.CarIpc;
+import com.caripc.sdk.ServicePublisher;
+
 CarIpc ipc = CarIpc.create(context);
 
 ServicePublisher publisher = ipc.publishService(
@@ -494,13 +504,19 @@ client.awaitReady(3000, new IpcCallback<Void>() {
             }
         });
 
-        // 5. 状态订阅 (subscribe)
+        // 5. 状态与事件多 Key 订阅 (subscribe)
         CancelHandle subscription = client.subscribe(
-            Collections.singletonList(ClimateContract.TARGET_TEMPERATURE),
+            Arrays.asList(ClimateContract.TARGET_TEMPERATURE, ClimateContract.SELF_TEST_FINISHED),
             message -> {
-                if (message.getPayload() instanceof PropertyUpdate) {
-                    PropertyUpdate<?> update = (PropertyUpdate<?>) message.getPayload();
-                    Log.i("CarIpcClient", "订阅推送: " + update.getKey().getId() + " = " + update.getSnapshot().getValue());
+                SubscriptionMessagePayload payload = message.getPayload();
+                if (payload instanceof PropertyUpdate) {
+                    PropertyUpdate<?> update = (PropertyUpdate<?>) payload;
+                    Log.i("CarIpcClient", "收到属性更新: " + update.getKey().getId() + " = " + update.getSnapshot().getValue());
+                } else if (payload instanceof EventEmission) {
+                    EventEmission event = (EventEmission) payload;
+                    Log.i("CarIpcClient", "收到事件广播: " + event.getKey().getId() + ", 负载=" + event.getEventData() + ", 序号=" + event.getDeliverySeq());
+                } else if (payload instanceof SubscriptionGap) {
+                    Log.w("CarIpcClient", "检测到消息乱序/丢包");
                 }
             }
         );

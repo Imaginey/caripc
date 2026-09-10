@@ -77,7 +77,7 @@ class MainActivity : Activity() {
     private fun publishDisplayService() {
         displayPublisher = ipc.publishService(
             serviceId = DisplayContract.SERVICE_ID,
-            schema = DisplayContract.schema
+            schema = DisplayContract.SCHEMA
         ) {
             onSet(DisplayContract.CURRENT_TITLE) { value, _ ->
                 mainHandler.post { logTextView.append("\n[Display Server] Title set to: $value") }

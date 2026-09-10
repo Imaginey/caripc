@@ -21,6 +21,8 @@ class CarIpc private constructor(
     private val config: CarIpcConfig
 ) : Closeable {
 
+    private val scheduler: TimeoutScheduler = ExecutorTimeoutScheduler()
+
     private val outboundExecutor = OutboundExecutor(
         corePoolSize = config.outboundCoreThreads,
         maxPoolSize = config.outboundMaxThreads
@@ -31,7 +33,12 @@ class CarIpc private constructor(
         registryComponent = config.registryComponent
     )
 
-    private val permissionPolicy = PermissionPolicy(context)
+    private val permissionPolicy = PermissionPolicy(
+        context = context,
+        strictMode = config.strictPermissionMode,
+        aclProvider = config.aclProvider
+    )
+
     private val publishers = ConcurrentHashMap<String, ServicePublisherImpl>()
     private val connections = ConcurrentHashMap<String, RemoteServiceImpl>()
 
@@ -52,7 +59,12 @@ class CarIpc private constructor(
     ): ServicePublisher {
         val instanceId = UUID.randomUUID().toString()
         IpcLog.i("CarIpc", "publishService() called for serviceId=$serviceId (instanceId=$instanceId)")
-        val stateStore = StateStore(instanceId)
+
+        // StateStore 与 SessionManager 互为依赖：用持有者打破循环（发射管线 → SessionManager 广播）
+        val sessionManagerHolder = arrayOfNulls<SessionManager>(1)
+        val stateStore = StateStore(instanceId, scheduler) { envelope ->
+            sessionManagerHolder[0]?.broadcastPropertyUpdate(envelope)
+        }
 
         // 注册 schema 中声明的所有 properties
         schema.properties.forEach { stateStore.registerProperty(it) }
@@ -71,18 +83,30 @@ class CarIpc private constructor(
             1, 0,
             instanceId,
             0L,
-            0, 0,
+            0,
+            0,
             capabilities
         )
 
+        schema.commands.filter { it.retryPolicy != RetryPolicy.NEVER }.forEach {
+            IpcLog.w(
+                "CarIpc",
+                "Command ${it.id} declares RetryPolicy.${it.retryPolicy} but this build does NOT implement automatic retry; " +
+                    "callers must handle retries themselves (see README: 重试与幂等)"
+            )
+        }
+
         val sessionManager = SessionManager(
-            descriptor,
-            stateStore,
-            permissionPolicy,
-            outboundExecutor,
-            onSet,
-            onCall
+            serviceDescriptor = descriptor,
+            stateStore = stateStore,
+            permissionPolicy = permissionPolicy,
+            outboundExecutor = outboundExecutor,
+            onSetHandler = onSet,
+            onCallHandler = onCall,
+            schema = schema,
+            scheduler = scheduler
         )
+        sessionManagerHolder[0] = sessionManager
 
         val endpointHost = EndpointHost(sessionManager)
 
@@ -105,9 +129,10 @@ class CarIpc private constructor(
         IpcLog.i("CarIpc", "connect() called for serviceId=$serviceId")
         return connections.computeIfAbsent(serviceId) {
             val controller = ConnectionController(
-                serviceId,
-                registryConnector,
-                outboundExecutor
+                serviceId = serviceId,
+                registryConnector = registryConnector,
+                outboundExecutor = outboundExecutor,
+                scheduler = scheduler
             )
             RemoteServiceImpl(controller, config)
         }
@@ -119,6 +144,7 @@ class CarIpc private constructor(
         connections.values.forEach { it.close() }
         connections.clear()
         registryConnector.close()
+        scheduler.shutdown()
         outboundExecutor.shutdown()
     }
 
@@ -126,6 +152,7 @@ class CarIpc private constructor(
         @JvmStatic
         @JvmOverloads
         fun create(context: Context, config: CarIpcConfig = CarIpcConfig()): CarIpc {
+            IpcLog.isDebugEnabled = config.debugLogging
             return CarIpc(context.applicationContext ?: context, config)
         }
     }
@@ -142,15 +169,30 @@ class CarIpc private constructor(
 
         private var regToken: RegistrationToken? = null
 
+        @Volatile
+        private var closed = false
+
         fun startPublish() {
             registryConnector.publish(descriptor, endpointHost, object : IRegistryCallback.Stub() {
                 override fun onPublished(token: RegistrationToken) {
                     regToken = token
+                    if (closed) {
+                        // close() 早于注册回调：立即撤销，避免「复活」一个已关闭的服务（工单 P1-8）
+                        IpcLog.i("CarIpc", "Publisher for $serviceId closed before registration ack; unpublishing $token")
+                        registryConnector.unpublish(token)
+                    }
                 }
-                override fun onPublishFailed(svcId: String, error: ErrorEnvelope) {}
+
+                override fun onPublishFailed(svcId: String, error: ErrorEnvelope) {
+                    IpcLog.w("CarIpc", "Publish failed for $svcId: ${error.message}")
+                }
+
                 override fun onSnapshot(svcId: String, wId: Long, d: ServiceDescriptor, e: IEndpoint) {}
+
                 override fun onServiceUnavailable(svcId: String, wId: Long) {}
+
                 override fun onServiceChanged(svcId: String, wId: Long, d: ServiceDescriptor, e: IEndpoint) {}
+
                 override fun onError(wId: Long, error: ErrorEnvelope) {}
             })
         }
@@ -159,37 +201,26 @@ class CarIpc private constructor(
             update(key, value, Quality.VALID)
         }
 
-        @Suppress("UNCHECKED_CAST")
         override fun <T : Any> update(key: PropertyKey<T>, value: T, quality: Quality) {
-            val envelope = stateStore.update(key, value, quality)
-            if (envelope != null) {
-                sessionManager.broadcastPropertyUpdate(envelope)
-            }
+            // 通知由 StateStore 的有序发射管线统一送出（含限频补发），调用方不再手工广播
+            stateStore.update(key, value, quality)
         }
 
         override fun <T : Any> emit(eventKey: EventKey<T>, payload: T) {
-            val envelope = SubscriptionEnvelope(
-                "",
-                descriptor.instanceId,
-                SubscriptionEnvelope.KIND_EVENT,
-                eventKey.id,
-                0L,
-                0L,
-                IpcPayload.ofAny(payload),
-                Quality.VALID.value,
-                android.os.SystemClock.elapsedRealtime(),
-                null,
-                null,
-                0,
-                false,
-                null
-            )
-            sessionManager.broadcastPropertyUpdate(envelope)
+            stateStore.emitEvent(eventKey.id, IpcPayload.ofAny(payload))
         }
 
         override fun close() {
+            if (closed) return
+            closed = true
+            // 1. 先撤销发布意图：注册中心重连后不会再把已关闭的服务重新发布
+            registryConnector.cancelPublishIntent(serviceId)
+            // 2. 已拿到 token 则显式注销
             regToken?.let { registryConnector.unpublish(it) }
-            sessionManager.closeAll()
+            regToken = null
+            // 3. 停止对外服务：拒绝新会话、清理已有会话与状态
+            sessionManager.markServiceClosed()
+            stateStore.close()
         }
     }
 

@@ -2,6 +2,7 @@ package com.caripc.registry
 
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Binder
 import android.os.IBinder
 import com.caripc.protocol.*
@@ -12,6 +13,11 @@ import java.io.FileDescriptor
 import java.io.PrintWriter
 
 class RegistryService : Service() {
+
+    companion object {
+        /** 集成层可通过 manifest meta-data 打开严格鉴权（默认关闭并打 WARN）。 */
+        const val META_STRICT_PERMISSION_MODE = "com.caripc.registry.STRICT_PERMISSION_MODE"
+    }
 
     private lateinit var permissionPolicy: PermissionPolicy
     private lateinit var registryStore: RegistryStore
@@ -25,29 +31,44 @@ class RegistryService : Service() {
 
         override fun unpublish(token: RegistrationToken) {
             val callingUid = Binder.getCallingUid()
-            IpcLog.i("RegistryService", "unpublish: serviceId=${token.serviceId}, gen=${token.generation} from UID $callingUid")
-            registryStore.unpublish(token)
+            IpcLog.i(
+                "RegistryService",
+                "unpublish: serviceId=${token.serviceId}, gen=${token.generation} from UID $callingUid"
+            )
+            registryStore.unpublish(callingUid, token)
         }
 
         override fun resolveAndWatch(serviceId: String, watchId: Long, callback: IRegistryCallback) {
             val callingUid = Binder.getCallingUid()
             IpcLog.i("RegistryService", "resolveAndWatch: serviceId=$serviceId, watchId=$watchId from UID $callingUid")
-            registryStore.resolveAndWatch(serviceId, watchId, callback)
+            registryStore.resolveAndWatch(callingUid, serviceId, watchId, callback)
         }
 
         override fun unwatch(watchId: Long, callback: IRegistryCallback?) {
             val callingUid = Binder.getCallingUid()
             IpcLog.i("RegistryService", "unwatch: watchId=$watchId from UID $callingUid")
-            registryStore.unwatch(watchId, callback)
+            registryStore.unwatch(callingUid, watchId)
         }
     }
 
     override fun onCreate() {
         super.onCreate()
         IpcLog.i("RegistryService", "RegistryService onCreate() initialized.")
-        permissionPolicy = PermissionPolicy(applicationContext)
+        val strict = readStrictPermissionMode()
+        IpcLog.i("RegistryService", "Permission policy strictMode=$strict")
+        permissionPolicy = PermissionPolicy(applicationContext, strictMode = strict)
         registryStore = RegistryStore(permissionPolicy)
         startInForeground()
+    }
+
+    private fun readStrictPermissionMode(): Boolean {
+        return try {
+            val info = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
+            info.metaData?.getBoolean(META_STRICT_PERMISSION_MODE, false) ?: false
+        } catch (e: Exception) {
+            IpcLog.w("RegistryService", "Failed to read strict-mode meta-data: ${e.message}")
+            false
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -90,6 +111,7 @@ class RegistryService : Service() {
 
     override fun dump(fd: FileDescriptor?, writer: PrintWriter?, args: Array<out String>?) {
         writer?.println("=== CarIpc Registry Diagnostics ===")
+        writer?.println("strictPermissionMode=${permissionPolicy.isStrictMode()}")
         writer?.println(registryStore.dump())
     }
 }
